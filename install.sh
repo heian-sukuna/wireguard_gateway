@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# install.sh — stand up a WireGuard VPN gateway on a fresh Ubuntu/Debian server.
+# install.sh — stand up a WireGuard VPN gateway on a fresh Linux server.
+#              Supports Debian/Ubuntu (apt), Arch (pacman) and Fedora/RHEL (dnf).
 #
 #   PORTABLE   nothing is hardcoded — the WAN interface, public IP and SSH port
 #              are all auto-detected (override any of them with flags).
@@ -31,38 +32,38 @@ Options:
   --subnet <cidr>     VPN subnet                 (default 10.66.66.0/24)
   --server-ip <ip>    gateway VPN address        (default 10.66.66.1)
   --dns "<a, b>"      DNS pushed to clients      (default 1.1.1.1, 1.0.0.1)
-  --endpoint <host>   public host clients dial   (default: auto-detect public IP)
+  --endpoint <h>      host clients dial: an IP/DNS name, 'auto' (public IP, for a
+                      VPS) or 'lan' (this box's LAN/host-only IP, for VMs)
   --interface <if>    WAN uplink for NAT         (default: auto-detect default route)
   --no-ufw            don't touch the firewall
   -y, --yes           assume yes (non-interactive)
+  --list-interfaces   list NICs + IPs (to pick --interface/--endpoint) and exit
   -h, --help          show this help
 EOF
 }
 
-# ── arg parse (CLI flags override config + defaults) ─────────────────────────────
-for a in "$@"; do [[ "$a" == -h || "$a" == --help ]] && { usage; exit 0; }; done
-require_root "$@"
-wg_load_config
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --port)       WG_PORT="$2";       shift 2;;
-    --subnet)     WG_SUBNET="$2";     shift 2;;
-    --server-ip)  WG_SERVER_IP="$2";  shift 2;;
-    --dns)        WG_DNS="$2";        shift 2;;
-    --endpoint)   WG_ENDPOINT="$2";   shift 2;;
-    --interface)  WAN_IF="$2";        shift 2;;
-    --no-ufw)     USE_UFW=0;          shift;;
-    -y|--yes)     ASSUME_YES=1;       shift;;
-    *) die "unknown option: $1  (try --help)";;
-  esac
-done
-WG_CONF="$WG_DIR/$WG_IF.conf"
-
-# ── detection ────────────────────────────────────────────────────────────────────
+# ── detection helpers (defined before arg-parse so --list-interfaces can use them) ─
 detect_wan_if() {
   ip -4 route show default 2>/dev/null \
     | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}'
+}
+
+# real, usable NICs — skips loopback and virtual/overlay interfaces so VMs and
+# multi-NIC hosts present a clean list (name-agnostic: ethN, enpXsY, ensXX, …)
+list_interfaces() {
+  ip -o link show up 2>/dev/null \
+    | awk -F': ' '{print $2}' | sed 's/@.*//' \
+    | grep -vE '^(lo|wg[0-9]*|docker[0-9]*|br-.*|veth.*|tailscale[0-9]*|virbr.*)$'
+}
+
+# best address for clients to *dial* on a LAN/VM: prefer a private IPv4 that is
+# NOT the VirtualBox NAT range (10.0.2.0/24, which is unreachable from the host).
+detect_lan_ip() {
+  local ips ip
+  ips="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+  ip="$(printf '%s\n' "$ips" | grep -vE '^10\.0\.2\.' | head -1)"
+  [[ -z "$ip" ]] && ip="$(printf '%s\n' "$ips" | head -1)"
+  printf '%s' "$ip"
 }
 
 detect_public_ip() {
@@ -82,14 +83,75 @@ detect_ssh_port() {
   echo "${p:-22}"
 }
 
+# print NICs + IPv4s, plus suggested WAN/endpoint — for choosing flags in a VM
+print_interfaces() {
+  printf '%sdetected interfaces:%s\n' "$C_CYAN$C_B" "$C_R"
+  local i ips
+  while read -r i; do
+    [[ -z "$i" ]] && continue
+    ips="$(ip -4 -o addr show dev "$i" scope global 2>/dev/null | awk '{print $4}' | tr '\n' ' ')"
+    printf '  %-14s %s\n' "$i" "${ips:-(no ipv4)}"
+  done < <(list_interfaces)
+  printf '%sdefault route / suggested --interface:%s %s\n' "$C_GRY" "$C_R" "$(detect_wan_if || echo '?')"
+  printf '%ssuggested --endpoint lan:%s %s\n'              "$C_GRY" "$C_R" "$(detect_lan_ip || echo '?')"
+}
+
+# ── arg parse (CLI flags override config + defaults) ─────────────────────────────
+for a in "$@"; do
+  case "$a" in
+    -h|--help)         usage; exit 0;;
+    --list-interfaces) print_interfaces; exit 0;;
+  esac
+done
+require_root "$@"
+wg_load_config
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port)       WG_PORT="$2";       shift 2;;
+    --subnet)     WG_SUBNET="$2";     shift 2;;
+    --server-ip)  WG_SERVER_IP="$2";  shift 2;;
+    --dns)        WG_DNS="$2";        shift 2;;
+    --endpoint)   WG_ENDPOINT="$2";   shift 2;;
+    --interface)  WAN_IF="$2";        shift 2;;
+    --no-ufw)     USE_UFW=0;          shift;;
+    -y|--yes)     ASSUME_YES=1;       shift;;
+    *) die "unknown option: $1  (try --help)";;
+  esac
+done
+WG_CONF="$WG_DIR/$WG_IF.conf"
+
 # ── steps ────────────────────────────────────────────────────────────────────────
+detect_pkg_mgr() {
+  if   command -v apt-get >/dev/null; then echo apt
+  elif command -v pacman  >/dev/null; then echo pacman
+  elif command -v dnf     >/dev/null; then echo dnf
+  else echo ""; fi
+}
+
 install_packages() {
-  command -v apt-get >/dev/null || die "this installer targets Debian/Ubuntu (apt-get not found)"
-  log "installing packages: wireguard, wireguard-tools, qrencode, ufw, curl …"
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
-  apt-get install -y -qq wireguard wireguard-tools qrencode ufw curl iproute2 >/dev/null
-  ok "packages installed"
+  local mgr; mgr="$(detect_pkg_mgr)"
+  case "$mgr" in
+    apt)
+      log "installing packages via apt (wireguard, qrencode, ufw, curl) …"
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y -qq wireguard wireguard-tools qrencode ufw curl iproute2 >/dev/null
+      ;;
+    pacman)
+      log "installing packages via pacman (wireguard-tools, qrencode, ufw, curl) …"
+      pacman -Sy --needed --noconfirm wireguard-tools qrencode ufw curl iproute2 >/dev/null
+      ;;
+    dnf)
+      log "installing packages via dnf (wireguard-tools, qrencode, ufw, curl) …"
+      dnf install -y wireguard-tools qrencode ufw curl iproute >/dev/null
+      ;;
+    *)
+      die "no supported package manager found (need apt, pacman, or dnf).
+       Install these manually, then re-run: wireguard-tools qrencode ufw curl"
+      ;;
+  esac
+  ok "packages installed ($mgr)"
 }
 
 ensure_forwarding() {
@@ -116,9 +178,13 @@ generate_server_keys() {
 }
 
 write_server_conf() {
-  local endpoint="$WG_ENDPOINT"
-  [[ "$endpoint" == auto ]] && endpoint="$(detect_public_ip)"
-  [[ -n "$endpoint" ]] || warn "could not determine a public endpoint — set --endpoint later"
+  local endpoint
+  case "$WG_ENDPOINT" in
+    auto) endpoint="$(detect_public_ip)";;   # public IP — for a VPS / real internet host
+    lan)  endpoint="$(detect_lan_ip)";;      # LAN / host-only IP — for VMs & local testing
+    *)    endpoint="$WG_ENDPOINT";;          # explicit IP or DNS name
+  esac
+  [[ -n "$endpoint" ]] || warn "could not determine an endpoint — set --endpoint <host> later"
 
   # preserve any existing [Peer] blocks across re-runs
   local peers=""
@@ -167,13 +233,15 @@ configure_ufw() {
   ufw route allow in on "$WG_IF" out on "$WAN_IF" >/dev/null 2>&1 || true
 
   # forwarded packets must be accepted for the VPN to route traffic out
-  sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+  [[ -f /etc/default/ufw ]] && \
+    sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
 
   if ufw status | grep -q "Status: active"; then
     ufw reload >/dev/null
     ok "UFW rules updated and reloaded"
   elif confirm "Enable UFW now? SSH ($ssh_port/tcp) is already allowed."; then
     ufw --force enable >/dev/null
+    systemctl enable ufw >/dev/null 2>&1 || true   # persist across reboots (Arch/others)
     ok "UFW enabled"
   else
     warn "UFW left disabled — rules are staged; run 'ufw enable' when ready"
@@ -214,8 +282,12 @@ print_summary() {
 # ── run ──────────────────────────────────────────────────────────────────────────
 banner
 [[ "$WAN_IF" == auto ]] && WAN_IF="$(detect_wan_if)"
-[[ -n "$WAN_IF" ]] || die "could not detect the WAN interface — pass --interface <iface>"
-log "target: WAN interface ${C_CYAN}$WAN_IF${C_R}"
+if [[ -z "$WAN_IF" ]]; then
+  err "could not auto-detect the WAN interface."
+  print_interfaces
+  die "re-run with:  --interface <name>"
+fi
+log "target: WAN interface ${C_CYAN}$WAN_IF${C_R}  (egress / NAT)"
 
 install_packages
 ensure_forwarding

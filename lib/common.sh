@@ -21,14 +21,18 @@ die()  { err "$*"; exit 1; }
 hr()   { printf '%s%s%s\n' "$C_GRY" "──────────────────────────────────────────────────────────────" "$C_R"; }
 
 banner() {
-  printf '%s' "$C_CYAN$C_B"
-  cat <<'EOF'
-   ┌──────────────────────────────────────────────────┐
-   │   W I R E G U A R D   ·   G A T E W A Y           │
-   │   zero-trust personal VPN  //  reproducible build │
-   └──────────────────────────────────────────────────┘
-EOF
-  printf '%s\n' "$C_R"
+  # Borders are generated to a fixed interior width so they can never drift, and
+  # the content is ASCII-only so printf pads by display columns in any locale.
+  local w=52 bar l1 l2
+  printf -v bar '%*s' "$w" ''; bar="${bar// /─}"
+  l1="  WIREGUARD :: GATEWAY"
+  l2="  zero-trust personal VPN // reproducible build"
+  printf '%s'          "$C_CYAN$C_B"
+  printf '   ┌%s┐\n'    "$bar"
+  printf '   │%s%*s│\n' "$l1" "$(( w - ${#l1} ))" ''
+  printf '   │%s%*s│\n' "$l2" "$(( w - ${#l2} ))" ''
+  printf '   └%s┘\n'    "$bar"
+  printf '%s\n'        "$C_R"
 }
 
 # ── interaction ─────────────────────────────────────────────────────────────────
