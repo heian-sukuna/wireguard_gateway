@@ -23,10 +23,10 @@ hr()   { printf '%s%s%s\n' "$C_GRY" "──────────────�
 banner() {
   # Borders are generated to a fixed interior width so they can never drift, and
   # the content is ASCII-only so printf pads by display columns in any locale.
-  local w=52 bar l1 l2
+  local w=34 bar l1 l2
   printf -v bar '%*s' "$w" ''; bar="${bar// /─}"
   l1="  WIREGUARD :: GATEWAY"
-  l2="  zero-trust personal VPN // reproducible build"
+  l2="  zero-trust personal VPN"
   printf '%s'          "$C_CYAN$C_B"
   printf '   ┌%s┐\n'    "$bar"
   printf '   │%s%*s│\n' "$l1" "$(( w - ${#l1} ))" ''
@@ -53,7 +53,7 @@ confirm() {
 human() {
   local b="${1:-0}" units=(B KiB MiB GiB TiB) i=0
   [[ "$b" =~ ^[0-9]+$ ]] || b=0
-  while (( b > 1024 && i < 4 )); do b=$(( b / 1024 )); ((i++)); done
+  while (( b >= 1024 && i < 4 )); do b=$(( b / 1024 )); i=$(( i + 1 )); done
   printf '%s%s' "$b" "${units[$i]}"
 }
 

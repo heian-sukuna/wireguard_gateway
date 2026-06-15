@@ -32,7 +32,7 @@ ENDPOINT="$WG_ENDPOINT"
 BASE="$(wg_subnet_base)"                       # e.g. 10.66.66
 esc="${BASE//./\\.}"
 last="$(grep -oE "AllowedIPs *= *${esc}\.[0-9]+" "$WG_CONF" 2>/dev/null \
-        | grep -oE '[0-9]+$' | sort -n | tail -1)"
+        | grep -oE '[0-9]+$' | sort -n | tail -1)" || true   # empty on first client
 next=$(( ${last:-1} + 1 ))
 [[ $next -lt 255 ]] || die "subnet $WG_SUBNET has no free addresses left"
 CLIENT_IP="$BASE.$next"

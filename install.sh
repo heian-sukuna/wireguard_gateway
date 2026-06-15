@@ -61,7 +61,7 @@ list_interfaces() {
 detect_lan_ip() {
   local ips ip
   ips="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
-  ip="$(printf '%s\n' "$ips" | grep -vE '^10\.0\.2\.' | head -1)"
+  ip="$(printf '%s\n' "$ips" | grep -vE '^10\.0\.2\.' | head -1)" || true  # grep=1 if all filtered
   [[ -z "$ip" ]] && ip="$(printf '%s\n' "$ips" | head -1)"
   printf '%s' "$ip"
 }
@@ -73,13 +73,13 @@ detect_public_ip() {
     [[ "$ip" =~ ^[0-9.]+$ ]] && { echo "$ip"; return 0; }
   done
   # fallback: primary address on the WAN interface
-  ip -4 addr show "$WAN_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1
+  ip -4 addr show "$WAN_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1 || true
 }
 
 detect_ssh_port() {
   local p
   p="$(awk '/^[[:space:]]*Port[[:space:]]+[0-9]+/{print $2; exit}' /etc/ssh/sshd_config 2>/dev/null || true)"
-  [[ -z "$p" ]] && p="$(ss -tlnH 'sport = :ssh' 2>/dev/null | awk '{split($4,a,":"); print a[length(a)]; exit}')"
+  [[ -z "$p" ]] && p="$(ss -tlnH 'sport = :ssh' 2>/dev/null | awk '{split($4,a,":"); print a[length(a)]; exit}')" || true
   echo "${p:-22}"
 }
 
@@ -206,15 +206,16 @@ write_server_conf() {
   } > "$WG_CONF"
   chmod 600 "$WG_CONF"
 
-  # state file so add-client/status don't have to re-detect anything
+  # state file so add-client/status don't have to re-detect anything.
+  # Values are quoted: WG_DNS contains a comma+space and is later `source`d.
   cat > "$WG_DIR/gateway.env" <<EOF
-WG_IF=$WG_IF
-WG_PORT=$WG_PORT
-WG_SUBNET=$WG_SUBNET
-WG_SERVER_IP=$WG_SERVER_IP
-WG_DNS=$WG_DNS
-WG_ENDPOINT=$endpoint
-WAN_IF=$WAN_IF
+WG_IF="$WG_IF"
+WG_PORT="$WG_PORT"
+WG_SUBNET="$WG_SUBNET"
+WG_SERVER_IP="$WG_SERVER_IP"
+WG_DNS="$WG_DNS"
+WG_ENDPOINT="$endpoint"
+WAN_IF="$WAN_IF"
 EOF
   PUBLIC_ENDPOINT="$endpoint"
   ok "server config written  (endpoint ${endpoint:-?}:$WG_PORT · nat via $WAN_IF)"

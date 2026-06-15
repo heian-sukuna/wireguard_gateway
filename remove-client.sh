@@ -22,7 +22,7 @@ CLIENT_CONF="$SCRIPT_DIR/clients/$NAME.conf"
 confirm "Revoke client '$NAME'? This is irreversible." || die "aborted"
 
 # derive the peer's public key from its stored private key
-pub="$(awk -F'= *' '/PrivateKey/{print $2; exit}' "$CLIENT_CONF" | wg pubkey)"
+pub="$(awk -F'= *' '/PrivateKey/{print $2; exit}' "$CLIENT_CONF" | wg pubkey 2>/dev/null)" || true
 [[ -n "$pub" ]] || die "could not derive public key from $CLIENT_CONF"
 
 # drop it from the live interface
