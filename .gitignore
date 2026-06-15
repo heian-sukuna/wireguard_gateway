@@ -1,0 +1,17 @@
+# ── secrets & generated artifacts — NEVER commit these ───────────────────────
+config/gateway.conf
+clients/
+*.key
+*.pub
+*.psk
+*.png
+*.conf
+
+# keep the templates that SHOULD be tracked
+!config/gateway.conf.example
+
+# ── editor / OS cruft ────────────────────────────────────────────────────────
+.directory
+.DS_Store
+*.swp
+*~

@@ -1,0 +1,18 @@
+# gateway.conf.example
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy to  config/gateway.conf  to override the auto-detected defaults.
+# Every value is OPTIONAL — the installer picks sane values when these are unset.
+# config/gateway.conf is git-ignored, so your choices never get committed.
+# CLI flags (e.g. --port) take precedence over anything set here.
+#
+#   cp config/gateway.conf.example config/gateway.conf
+#   $EDITOR config/gateway.conf
+# ─────────────────────────────────────────────────────────────────────────────
+
+# WG_IF=wg0                    # WireGuard interface name
+# WG_PORT=51820                # UDP listen port (forward this on your router)
+# WG_SUBNET=10.66.66.0/24      # VPN subnet
+# WG_SERVER_IP=10.66.66.1      # the gateway's address inside the VPN
+# WG_DNS="1.1.1.1, 1.0.0.1"    # DNS servers pushed to clients
+# WG_ENDPOINT=auto             # public host/IP clients dial; 'auto' = detect public IP
+# WAN_IF=auto                  # uplink interface used for NAT; 'auto' = default route
