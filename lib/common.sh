@@ -57,6 +57,36 @@ human() {
   printf '%s%s' "$b" "${units[$i]}"
 }
 
+# gui_open <file> — best-effort: pop a file open in the desktop's default viewer so a
+# QR can be scanned straight off the screen. The toolkit runs as root (sudo), so we
+# drop back to the invoking user to reach *their* X/Wayland session. Returns 0 only
+# when a graphical session exists and a viewer was launched; callers always keep a
+# terminal fallback in case the window silently fails to appear (X auth, headless).
+gui_open() {
+  local f="$1" user uid disp opener=""
+  user="${SUDO_USER:-${USER:-root}}"
+  uid="$(id -u "$user" 2>/dev/null || echo 0)"
+  disp="${DISPLAY:-}"
+  [[ -z "$disp" && -e /tmp/.X11-unix/X0 ]] && disp=":0"
+  [[ -n "$disp" || -n "${WAYLAND_DISPLAY:-}" ]] || return 1   # no GUI → caller falls back
+  for o in xdg-open gio feh eog display gwenview gpicview qiv; do
+    command -v "$o" >/dev/null 2>&1 && { opener="$o"; break; }
+  done
+  [[ -n "$opener" ]] || return 1
+  [[ "$opener" == gio ]] && opener="gio open"
+  if [[ "$user" != root && "${EUID:-$(id -u)}" -eq 0 ]]; then
+    sudo -u "$user" env DISPLAY="${disp:-:0}" \
+         WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+         XDG_RUNTIME_DIR="/run/user/$uid" \
+         XAUTHORITY="$(eval echo "~$user")/.Xauthority" \
+         $opener "$f" >/dev/null 2>&1 &
+  else
+    $opener "$f" >/dev/null 2>&1 &
+  fi
+  disown 2>/dev/null || true
+  return 0
+}
+
 # ── configuration (defaults ← config/gateway.conf ← env) ─────────────────────────
 # Precedence, lowest→highest: built-in defaults, config/gateway.conf, environment,
 # and finally CLI flags (applied by the caller after this runs).

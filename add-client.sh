@@ -82,12 +82,38 @@ if systemctl is-active --quiet "wg-quick@$WG_IF"; then
 fi
 
 ok "client '$NAME' created  →  $CLIENT_CONF   (VPN IP $CLIENT_IP)"
+
+# ── QR code ──────────────────────────────────────────────────────────────────────
+# The on-disk .conf (pretty, commented) makes a dense v16/77² QR that scans badly off
+# a terminal. For the QR we encode a *minified but still valid* config — no comment,
+# no alignment padding, compact key=value — which drops to v13/69²: fewer, bigger
+# modules that a phone camera reads far more reliably. We also write a crisp PNG and
+# try to pop it open in an image viewer, so the foolproof path is "point phone at the
+# window", not "import a file".
+QR_DATA="[Interface]
+PrivateKey=$priv
+Address=$CLIENT_IP/32
+DNS=$WG_DNS
+[Peer]
+PublicKey=$SERVER_PUB
+PresharedKey=$psk
+Endpoint=$ENDPOINT:$WG_PORT
+AllowedIPs=0.0.0.0/0,::/0
+PersistentKeepalive=25"
+
+QR_PNG="$CLIENT_DIR/$NAME.png"
+qrencode -o "$QR_PNG" -s 10 -m 4 <<<"$QR_DATA" 2>/dev/null || true
+
 hr
 log "scan with the WireGuard mobile app:"
 echo
-qrencode -t ansiutf8 < "$CLIENT_CONF"
+qrencode -t ansiutf8 -m 2 <<<"$QR_DATA"
 echo
-if qrencode -o "$CLIENT_DIR/$NAME.png" < "$CLIENT_CONF" 2>/dev/null; then
-  log "QR also saved as image  →  $CLIENT_DIR/$NAME.png"
+if [[ -f "$QR_PNG" ]] && gui_open "$QR_PNG"; then
+  ok "opened a crisp QR image too — if the terminal QR won't scan, scan that window"
+  log "image saved → $QR_PNG"
+else
+  log "crisp QR image saved → $QR_PNG"
+  log "if the QR above is too cramped to scan, open that PNG and scan it instead"
 fi
 hr
